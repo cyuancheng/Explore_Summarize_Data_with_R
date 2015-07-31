@@ -1,0 +1,8 @@
+reference:
+
+1. R markdown: http://rmarkdown.rstudio.com/authoring_basics.html
+2. choroplethr: https://github.com/trulia/choroplethr
+3. directlabels: http://directlabels.r-forge.r-project.org
+4. R Graphics Cookbook, Practical Recipes for Visualizing Data
+By Winston Chang, Publisher: O'Reilly Media, 2012.
+

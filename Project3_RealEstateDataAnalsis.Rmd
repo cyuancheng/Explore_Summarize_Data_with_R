@@ -1,0 +1,1271 @@
+###Project 3: Analyzing Real Estate Data | Data Analysis with R
+
+- Author:  Chi-Yuan Cheng (cyuancheng AT gmail DOT com) 
+- updated: June 25, 2015
+
+------
+
+####1. Introduction 
+
+In this project, I analyzed residential real estate data of USA to explore the historical house prices by state and by region. I also digged a bit deeper to look at which variable in the Census data impacted the house price in America between 2008 and 2012. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+# load all of the packages
+suppressMessages(library(rmarkdown))
+suppressMessages(library(ggplot2))
+suppressMessages(library(tidyr))
+suppressMessages(library(dplyr))
+suppressMessages(library(zoo))
+suppressMessages(library(lubridate))
+suppressMessages(library(grid))
+suppressMessages(library(gridExtra))
+suppressMessages(library(scales))
+suppressMessages(library(memisc))
+suppressMessages(library(acs)) # US American Community Survey (ACS) 5 year estimates
+suppressMessages(library(GGally))
+suppressMessages(library(choroplethr))
+suppressMessages(library(directlabels))
+suppressMessages(library(base64enc))
+suppressMessages(library(maps))
+
+require(devtools)
+#install_github("choroplethr", "trulia")
+#install_github("ramnathv/rCharts@dev")
+#install_github("ramnathv/rMaps")
+suppressMessages(library(rMaps))
+```
+
+####2. Data Manipulation
+
+####(a) Load and reshape data
+
+The data I used are:
+
+- Housing data of USA, 1996-2015, from [Zillow](http://www.zillow.com/research/data/).
+    + Median Listing Price per Square Feet
+    + Median Sold Price per Square Feet
+
+- US American Community Survey 5 year estimates, 2008-2012 ([data](http://factfinder.census.gov/faces/nav/jsf/pages/searchresults.xhtml?refresh=t))
+    + I obtained the Census data using an API from [US Census Bureau](http://api.census.gov/data/key_signup.html).
+
+- Violent crime rates (per 100,000) by state in USA, 1960-2010, from [rMaps](https://github.com/ramnathv/rMaps/tree/master/data).
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Load_house_data}
+# set working directory
+setwd("/Users/cyuancheng/Documents/course/Nanodegree/R/submitted")
+#load the house data
+#This is the main data set for house sold price
+MSP <- read.csv('City_MedianSoldPricePerSqft_AllHomes.csv')
+#This is the main data set for house listing price
+MLP <- read.csv('City_MedianListingPricePerSqft_AllHomes.csv')
+```
+
+The data structure of house data set:
+```{r echo=FALSE, message=FALSE, warning=FALSE, reshape_house_data}
+# reshape the dataframe, rename, and convert the time format
+MLP1 <- gather(MLP, monthyear, price, X2008.10:X2015.02)
+colnames(MLP1)[5] <- "monthyear"
+colnames(MLP1)[6] <- "price"
+colnames(MLP1)[2] <- "state"
+MLP1$monthyear <- as.Date(as.yearmon(MLP1$monthyear, "X%Y.%m"))
+MSP1 <- gather(MSP, monthyear, price, X1996.04:X2015.03)
+colnames(MSP1)[5] <- "monthyear"
+colnames(MSP1)[6] <- "price"
+colnames(MSP1)[2] <- "state"
+MSP1$monthyear <- as.Date(as.yearmon(MSP1$monthyear, "X%Y.%m"))
+# data structure
+str(MSP1) 
+```
+
+This date set contains the following features: RegionName, state, Metro, CountyName, monthyear, and price. The features of interest in this project are *state*, *Metro*, *monthyear*, and *price*. 
+
+Besides house data, I attempted to use Census data to understand how economy and demographics affect house price.  I think these data will help support my investigation and data exploratory of house price data. 
+
+I obtained the Census data of US American Community Survey 5 year estimates (2008-2012) from an [API](http://api.census.gov/data/key_signup.html). 
+
+The features of interest are below:
+
+no. | table.number | feature | dataframe |
+--- | --- | --- | --- |
+1 | B25026 | Total population in occupied housing units by tenure | "df_pop_state" |
+2 | B01002 | Median age by sex | "df_median.age" |
+3 | B25119 | Median household income by tenure | "df_median.income" |
+4 | B25105 | Median Monthly housing costs  | "df_median.housecost" |
+5 | B25097 | Mortgage status by median value | "df_median.housevalue" |
+6 | B25103 | Mortgage status by median real estate taxes paid  | "df_housetax" |
+7 | B25119 | Median year structure built | "df_houseyear" |
+8 | B25039 | Median year householder moved into unit by tenure | "df_moveyear"|
+
+Besides Census data, I also explored *violent crime rates* data of USA from the rMaps package.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, load_census_data}
+# The Census data was obtained from API (US Census Bureau).
+api.key.install("77d65aee5bd2b728b4120c4657a1fa622e135adc")
+
+# 1. population estimates for US States in 2012.
+data(df_pop_state)
+
+# 2. median age for US states in 2012
+df_median.age <- get_acs_data("B01002", "state", 
+                              endyear = 2012, span = 5, 
+                              column_idx = 1)[[1]] 
+
+# 3. median household income by state in 2012
+df_median.income <- get_acs_data("B25119", "state", 
+                                 endyear = 2012, span = 5, 
+                                 column_idx = 2)[[1]] 
+
+# 4. Monthly house costs 2012
+df_median.housecost <- get_acs_data("B25105", "state", 
+                                    endyear = 2012, span = 5, 
+                                    column_idx = 1)[[1]] 
+
+# 5. Median value of house in 2012
+df_median.housevalue <- get_acs_data("B25097", "state", 
+                                     endyear = 2012, span = 5, 
+                                     column_idx = 1)[[1]] 
+
+# 6. Median real estate taxes paid in 2012
+df_housetax <- get_acs_data("B25103", "state", 
+                            endyear = 2012, span = 5,
+                            column_idx = 2)[[1]] 
+
+# 7. Median year structure built
+df_houseyear <- get_acs_data("B25035", "state", 
+                             endyear = 2012, span = 5,
+                             column_idx = 1)[[1]] 
+
+# 8. Median year householder moved into unit 
+df_yearmove <- get_acs_data("B25039", "state", 
+                            endyear = 2012, span = 5,
+                            column_idx = 1)[[1]] 
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, reshape_census_data}
+# Reorganize the dataframe.
+# convert lower case to upper case in the state name
+simpleCap <- function(x) {
+  s <- strsplit(x, " ")[[1]]
+  paste(toupper(substring(s, 1, 1)), substring(s, 2),
+      sep="", collapse = " ")}
+#----------------------------------------------------
+# Population in 2012
+# change the capital letter in state name
+df_pop_state$region <-  sapply(df_pop_state$region, simpleCap)
+# clean data, add state abbreviate, and region, change name
+df_pop_state$state <- state.abb[match(df_pop_state$region, 
+                                      state.name)]
+# add region in dataframe
+df_pop_state$region <- state.region[match(df_pop_state$region, 
+                                          state.name)]
+colnames(df_pop_state)[2] <- "pop"
+
+# create a new dataframe for state and region
+region.state <- subset(df_pop_state, select = c(state, region))
+
+# median age for US States in 2012
+df_median.age$region <-  sapply(df_median.age$region, simpleCap)
+df_median.age$state <- state.abb[match(df_median.age$region, 
+                                       state.name)]
+df_median.age$region <- state.region[match(df_median.age$region, 
+                                           state.name)]
+colnames(df_median.age)[2] <- "med.age"
+
+# median household income by state in 2012
+df_median.income$region <-  sapply(df_median.income$region, 
+                                   simpleCap)
+df_median.income$state <- state.abb[match(df_median.income$region, 
+                                          state.name)]
+df_median.income$region <- state.region[match(df_median.income$region, 
+                                              state.name)]
+colnames(df_median.income)[2] <- "med.income"
+
+# monthly house costs 
+df_median.housecost$region <- sapply(df_median.housecost$region, 
+                                     simpleCap)
+df_median.housecost$state <- state.abb[match(df_median.housecost$region,state.name)]
+df_median.housecost$region <- state.region[match(df_median.housecost$region,
+                  state.name)]
+colnames(df_median.housecost)[2] <- "med.housecost"
+
+# median value of house 
+df_median.housevalue$region <- sapply(df_median.housevalue$region, 
+                                      simpleCap)
+df_median.housevalue$state <- state.abb[match(df_median.housevalue$region,
+                state.name)]
+df_median.housevalue$region <- state.region[match(df_median.housevalue$region,
+                   state.name)]
+colnames(df_median.housevalue)[2] <- "med.housevalue"
+
+# median real estate taxes paid
+df_housetax$region <-  sapply(df_housetax$region, 
+                              simpleCap)
+df_housetax$state <- state.abb[match(df_housetax$region, 
+                                     state.name)]
+df_housetax$region <- state.region[match(df_housetax$region, 
+                                         state.name)]
+colnames(df_housetax)[2] <- "housetax"
+
+# median year structure built
+df_houseyear$region <-  sapply(df_houseyear$region, 
+                               simpleCap)
+df_houseyear$state <- state.abb[match(df_houseyear$region, 
+                                      state.name)]
+df_houseyear$region <- state.region[match(df_houseyear$region, 
+                                          state.name)]
+colnames(df_houseyear)[2] <- "houseyear"
+df_houseyear$house.year <- 2012 - df_houseyear$houseyear 
+
+# Median year householder moved into unit 
+
+df_yearmove$region <-  sapply(df_yearmove$region, simpleCap)
+df_yearmove$state <- state.abb[match(df_yearmove$region, 
+                                      state.name)]
+df_yearmove$region <- state.region[match(df_yearmove$region, 
+                                          state.name)]
+colnames(df_yearmove)[2] <- "yearmove"
+df_yearmove$move.year <- 2012 - df_yearmove$yearmove
+
+# violent crime rates by state (median value betewwen 1960 and 2010)
+# violent_crime$Crime
+
+```
+
+####(b) Clean data
+
+I removed outliers from the house data.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=3, fig.width=8, outlier.remove}
+
+#function to remove outlier 
+#(including prices that are within the 95 % range)
+
+remove_outliers <- function(x, na.rm = TRUE, ...) {
+  qnt <- quantile(x, probs=c(.5, .95), na.rm = na.rm, ...)
+  H <- 1.5 * IQR(x, na.rm = na.rm)
+  y <- x
+  y[x < (qnt[1] - H)] <- NA
+  y[x > (qnt[2] + H)] <- NA
+  y
+  }
+
+# plot boxplots side by side
+
+p1 <- ggplot(data = MSP1, aes(x=1, y=price)) +
+      geom_boxplot() +
+      labs(y = "median sold price per sqft.", 
+           title = "Fig. 2-1a: Original data set") +
+      scale_x_continuous(breaks=NULL) +
+      theme(text = element_text(size=11),
+            axis.title.x = element_blank())
+
+p2 <- ggplot(data = MSP1, aes(x=1, y=remove_outliers(price))) +
+      labs(y = "median sold price per sqft.", 
+        title = "Fig. 2-1b: Remove outliers that are not 
+           within 95 % of median value") +
+      geom_boxplot() +
+      scale_x_continuous(breaks=NULL) +
+      theme(text = element_text(size=11),
+            axis.title.x = element_blank())
+      
+grid.arrange(p1, p2, ncol=2)
+
+# make a new data set after removing outliers:
+
+MSP.noOutlier <- subset(MSP1, price == remove_outliers(price), !is.na(price))
+MLP.noOutlier <- subset(MLP1, price == remove_outliers(price), !is.na(price))
+```
+
+The median sold price in the house data set contains lots of outliers (Fig 2-1a). I removed the outliers and only included the prices that are within 95 % of median price value. The box plot after removing outliers is shown in Fig 2-1b.
+
+####(c) Data overview
+
+I summarized the data contained the data of house price, Census data, and crime rates between 2008 and 2012:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, reshape_final_table}
+# I combined all the data into one dataframe.
+# get the median house sold price in 2008
+MSP.2012 <- subset(MSP.noOutlier, monthyear >= "2008-01-01" & 
+                     monthyear <= "2012-12-31" & 
+                     !is.na(price), !is.na(state)) %>%
+            group_by(state) %>%
+            summarise(median_sold_price = median(as.numeric(price)),
+            n=n())
+
+
+# calculate the median violent crime rate between 2008-2010
+
+violent.crime.2010 <- subset(violent_crime, 
+                   Year >= "2008" & 
+                   Year <= "2010" & 
+                   !is.na(Crime)) %>%
+              group_by(State) %>%
+              summarise(median_crime = median(as.numeric(Crime)))
+
+colnames(violent.crime.2010)[1] <- "state" # rename
+
+# add region into dataframe
+
+violent.crime.2010 <- merge(violent.crime.2010, region.state, 
+                       by.x = "state",
+                       by.y = "state", 
+                       all.x = TRUE)
+
+# make a list for the features in Census data
+list_df <- list(df_pop_state, df_median.age, df_median.housecost,
+                df_median.housevalue, df_median.income, df_housetax,
+                df_houseyear, df_yearmove)
+
+# merge dataframes for Census data
+merged_df  <- Reduce(merge, 
+                     lapply(list_df , 
+                     function(x) 
+                     data.frame(x, rn = row.names(x))))
+
+# combine house data and Census data by state
+merged_df1 <- merge(MSP.2012, merged_df, by = "state", all = TRUE)
+merged_df1 <- merge(merged_df1, violent.crime.2010, c("state", "region"), 
+                    all = TRUE)
+
+# make a new dataframe 
+merged_df2 <- subset(merged_df1, 
+                     !is.na(median_sold_price) & !is.na(region))
+
+# add region into house price dataframe
+MSP.noOutlier <- merge(MSP.noOutlier, region.state, 
+                       by.x = "state",
+                       by.y = "state", 
+                       all.x = TRUE)
+
+# add region into violent crime dataframe
+violent.crime <- merge(violent_crime, region.state, 
+                       by.x = "State",
+                       by.y = "state", 
+                       all.x = TRUE)
+
+head(merged_df2) # house + Census + crime data
+```
+
+The observations of Census data:
+```{r echo=FALSE, message=FALSE, warning=FALSE, obs.census.data}
+nrow(df_pop_state)
+```
+
+The observations of house data:
+```{r echo=FALSE, message=FALSE, warning=FALSE, obs.house.data}
+nrow(MSP.2012)
+```
+
+It turns out that 9 states (AK, ID, KS, MT, ND, NM, SD, UT, and WY) are missing in the house data set of Zillow. 
+
+To get a better sense of the variables I will explore, I used univariate analysis to obtain the distribution of house price, time, and state in the house data set
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=10, distribution.price.state}
+
+# bar chart for price distribution of the dataset
+p1 <- ggplot(aes(x=price), data = MSP.noOutlier) + 
+  geom_bar(colour="black", fill="blue", width=.8, 
+           stat="bin", binwidth = 10, alpha = .3) +
+  geom_vline(xintercept = median(MSP.noOutlier$price), 
+             linetype="dashed", size = 1, color ="red") +
+  geom_vline(xintercept = mean(MSP.noOutlier$price), 
+             linetype="dotted", size = 1, color ="red") +
+  annotate("text", label = "mean", parse = FALSE, 
+           x = 170, y = 70000, color = "red") +
+  annotate("text", label = "median", parse = FALSE, 
+           x = 60, y = 75000, color = "red") +
+  labs(x= "median sold price per sqft.", y = "count",
+        title = "Fig. 2-2a: Distribution of house price in the data set") +
+    theme(text = element_text(size = 11))
+
+#datebreak and datelimit for the plots
+datebreaks <- seq(as.Date("1995-01-01"), as.Date("2015-01-01"), 
+                  by="12 month")
+datelimits <- c(as.Date("1995-01-01"), as.Date("2015-01-01"))
+
+# bar chart for time distribution of the dataset
+p2 <- ggplot(aes(x = monthyear), data = MSP.noOutlier)+ 
+  geom_bar(colour="black", fill="blue", width=.8, 
+           stat="bin", binwidth = 250, alpha = .5) + 
+  labs(x= "year", y = "count",
+        title = "Fig. 2-2b: Distribution of time in the data set") +
+    scale_x_date(breaks = datebreaks, 
+               limits = datelimits, 
+               labels = date_format("%Y")) + 
+    theme(text = element_text(size = 11),
+              axis.text.x = element_text(angle = 30, hjust = 1)) 
+
+# bar chart for the distribution of state data set
+p3 <-  ggplot(aes(x=reorder(state, state, function(x) - length(x)),
+           fill = region), data = subset(MSP.noOutlier, !is.na(state))) + 
+  geom_bar(colour="black",width=.8, 
+           stat="bin", binwidth = 1) + 
+  labs(x= " ", y = "count",
+        title = "Fig. 2-2c: Distribution of state in the data set") +
+    theme(text = element_text(size = 11),
+              legend.title = element_blank())
+
+grid.arrange(arrangeGrob(p1, p2, ncol=2), p3, widths=c(3, 5), ncol=1)
+```
+
+Fig 2-2a shows that the house price exhibits a positively skewed distribution, which has the mean to the right of the median value. According to Fig 2-2b, the house data is recorded between 1996 and 2015. The maximal count of data was accumulated between 2004 and 2006. Fig 2-2c shows that the count of data for each state has a great distribution. CA has the largest data pool, whereas VT has the smallest data pool.
+
+####3. Data Analysis and Exploration
+
+####*A. House data*
+
+#####(a) Comparison of sold house price and listed house price in USA (2009-2014)
+
+The idea here is to see how the listed house price different from the sold house price. Firstly, let's compare the house sold price and listed price between 2009 and 2014.
+```{r echo=FALSE, message=FALSE, warning=FALSE, tidy=FALSE, Sold_List_Price}
+# subset of data
+MSP1.price <- subset(MSP.noOutlier, monthyear>= "2009-01-01" & 
+                    monthyear <= "2014-12-31" & 
+                    !is.na(price), 
+            select = c(RegionName, state, 
+                       Metro, monthyear, price))
+MLP1.price <- subset(MLP.noOutlier, monthyear>= "2009-01-01" & 
+                    monthyear <= "2014-12-31" & 
+                   !is.na(price), 
+            select = c(RegionName, state, 
+                       Metro, monthyear, price))
+```
+
+Summary of sold house price (2009-2014):
+```{r echo=FALSE, message=FALSE, warning=FALSE, tidy=FALSE, summary.sold.price}
+with(MSP1.price , summary(price))
+```
+
+Summary of listed house price (2009-2014):
+```{r echo=FALSE, message=FALSE, warning=FALSE, tidy=FALSE, summary.list.price}
+with(MLP1.price , summary(price))
+```
+
+The sold house price is on average slightly higher than the listed house price between 2009 and 2014. It would be interesting to compare the prices before 2009. But unfortunately, the data of median listed price from Zillow is only available after October 2008.
+
+Next, we can further compare the median listed price vs. median sold price with time.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=4, fig.width=9, Median_House_Price}
+#Combine two dataframes into a new dataframe
+MSP1.price$col <- 'Median Sold Price'
+MLP1.price$col <- 'Median Listing Price'
+MSPLP <- rbind(MSP1.price, MLP1.price)
+
+# Fig 3-1. median house price with time (listed price v.s. sold price)
+datebreaks <- seq(as.Date("2009-01-01"), as.Date("2015-02-01"), 
+                  by="6 month") # set time breaks every 6 months
+
+p <- ggplot(aes(x = monthyear, y = price), data = MSPLP) +
+    geom_line(aes(color = col), stat='summary', fun.y =median) +
+    labs(y="median price per sqft.", 
+    title='Fig. 3-1: Median price per sqft in USA (2009-2014)',
+    color=" " ) +
+    scale_x_date(breaks=datebreaks, labels=date_format("%m-%Y")) +
+        theme(text = element_text(size=11),
+              axis.text.x = element_text(angle=30, hjust=1), 
+              legend.position="bottom", 
+              axis.title.x = element_blank())
+direct.label(p, list(last.points, cex=1, hjust = 1, vjust = 7.5))
+```
+
+Again, the median sold price is overall higher than the median listing price between 2009 and 2014. The minimal sold price occurred in January 2012. Since than, the sold price drastically raises to about 30 %.
+
+Because the Census data we will explore is between 2008 and 2012, it would be interesting to know what is the most expensive and cheapest home sold during this time period. 
+
+#####(b) The 5 most expensive and less expensive home sold (2008-2012)
+```{r echo=FALSE, message=FALSE, warning=FALSE, tidy=TRUE, HousePrice_2012}
+# dataframe contained median sold price 
+#(regionname, state, metro, monthyear, price)
+MSP1.2012 <- subset(MSP.noOutlier, monthyear>= "2008-01-01" &
+                    monthyear <= "2012-12-31" &
+                    !is.na(price), 
+              select = c(RegionName, state, Metro, monthyear, price)) 
+# add region into dataframe
+MSP1.2012  <- merge(MSP1.2012, region.state, 
+                       by.x = "state",
+                       by.y = "state", 
+                       all.x = TRUE)
+```
+
+The 5 most expensive home sold (2008-2012):
+```{r echo=FALSE, message=FALSE, warning=FALSE, tidy=TRUE, Expensive.home.2012}
+head(MSP1.2012[order(MSP1.2012$price, decreasing = T),],5)
+```
+
+The 5 cheapest home sold (2008-2012):
+```{r echo=FALSE, message=FALSE, warning=FALSE, tidy=TRUE, Cheap.Home.2012}
+head(MSP1.2012[order(MSP1.2012$price, decreasing = F),],5)
+```
+
+Between 2008 and 2012, the most expensive house was sold in Los Angeles, CA, whereas the cheapest house was sold in Palatka, FL. Notably, three of the top 5 most expensive home were sold in the West.
+
+#####(c) Comparison of house sold price by region (2000-2014)
+
+The house price largely depends on the location. Here, let's take a look at the house price changes with time at different regions. 
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=4, fig.width=9, MSP.region}
+# subset region data
+MSP.region <- subset(MSP.noOutlier, 
+                     select = c(RegionName, state, Metro, 
+                                monthyear, price, region)) 
+
+MSP.Nation <- subset(MSP.noOutlier, 
+                     select = c(monthyear, price))
+
+MSP.Nation$Metro <- "USA"
+MSP.Nation$RegionName <-"USA"
+MSP.Nation$state <- "USA"
+MSP.Nation$region <- "USA"
+
+# include National data
+MSP.region <- rbind(MSP.region, MSP.Nation) 
+
+#datebreak and datelimit for the plots
+datebreaks <- seq(as.Date("2000-01-01"), as.Date("2015-01-01"), 
+                  by="12 month")
+datelimits <- c(as.Date("2000-01-01"), as.Date("2015-01-01"))
+
+#Fig 3-2. Sold price by region between 2000-2014
+p <- ggplot(aes(x = monthyear, y = price), 
+            data = subset(MSP.region, !is.na(region))) +
+  geom_line(aes(color = region), 
+            stat = 'summary', fun.y = median) + 
+  labs(x = "year", 
+       y = "median sold price per sqft.", 
+       title = 'Fig. 3-2: Median house price by region') +
+  scale_x_date(breaks = datebreaks, 
+               limits = datelimits, 
+               labels = date_format("%Y")) + 
+  theme(text = element_text(size = 11),
+              axis.text.x = element_text(angle = 30, hjust = 1), 
+              legend.position = "right", 
+              axis.title.x = element_blank()) 
+direct.label(p,"top.bumpup")
+```
+
+The house prices in the West and Northeast are above national median price, whereas the prices in the North Central and South are below the national median price between 2000 and 2014. Generally, the maximal price appears in 2007, following by a graduate decrease in price until 2012. The price then increases after 2012. 
+
+Interestingly, the house price in the Northeast drastically drops in the beginning of 2015. The price is even below the national median price and price in the North Central. This decline of house price might be caused by the several [snowstorms](http://www.boston.com/news/local/massachusetts/2014/01/03/the-first-major-snow-storm-underway/v7af5SOnFX09Oj3pjIECeK/story.html) in the Northeast in the end of last year.
+
+To make sure Fig 3-2 is not over-plotting, I used a box plot to show the variance in the data with time.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=4, fig.width=9, MSP.boxplot}
+# subset 
+MSP.year <- subset(MSP.noOutlier, 
+                   monthyear >= "2000-01-01" &
+                   monthyear <= "2015-01-01",
+                   select = c(state, monthyear, price )) 
+MSP.year$year <- format(MSP.year$monthyear , "%Y")
+
+ggplot(aes(x = year, y = price), data = MSP.year) +
+  geom_boxplot() + 
+  theme(text = element_text(size = 11)) +
+  labs(x = ' ', y = 'median house price per sqft.', 
+       title = 'Fig. 3-3: Median house price in USA') 
+```
+
+The above figure shows that almost all the data follows the same trend as in Fig 3-2, suggesting that Fig 3-2 is not over-plotting.
+
+#####(d) Comparison of house sold price in select cities (2000-2014)
+
+Secondly, we can compare the house price in select cities.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=4, fig.width=10, cities}
+# Make a new dataframe for city subgroup
+MSP.cities <- subset(MSP.noOutlier, 
+                     Metro == "New York" | Metro == "Boston" | 
+                     Metro == "Los Angeles" | Metro == "Chicago"| 
+                     Metro == "San Francisco"  &  !is.na(price), 
+                     select = c(RegionName, state, 
+                                Metro, monthyear, price, region)) 
+
+MSP.cities <- rbind(MSP.cities, MSP.Nation)
+
+#Fig 3-4. Sold price in select cities between 2000-2014
+ggplot(aes(x = monthyear, y = price), 
+       data = subset(MSP.cities, !is.na(price))) +
+      geom_line(aes(color = Metro),
+            stat = 'summary', fun.y = median) +
+      labs(x = "year", 
+       y = "median sold price per sqft.", 
+       title = 'Fig. 3-4: Median house price in select cities') +
+  scale_x_date(breaks = datebreaks, 
+               limits = datelimits, labels = date_format("%Y")) + 
+  theme(text = element_text(size=11),
+              axis.text.x = element_text(angle=30, hjust=1), 
+              legend.position = "right", 
+              axis.title.x = element_blank(),
+              legend.title = element_blank())
+```
+
+The trend of sold price in select cities are very similar with the trend in their regions shown in Fig 3-2. The maximal house price is between 2006 and 2007, following by a graduate decline. The minimal price reaches in 2012, and price increases again until 2015. The house prices in New York and Boston are dropped in the end of 2014. Overall, the house prices of these big cities are higher than the national price. The house prices in San Francisco and Los Angeles are about a factor of 2-3 higher than the national median price. 
+
+#####(e) Comparison of sold price in Santa Barabra (1996-2014)
+
+I live in Santa Barbara, CA for 6 years. I'm very interested in the house price in this area, so I did a data exploration on the house price of cities in Santa Barbara county, as following. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, MSP.SB}
+# make a new dataframe for SB
+MSP.SB <- subset(MSP.noOutlier, 
+                 Metro == "Santa Barbara" & !is.na(price), 
+                 select = c(RegionName, monthyear, price))
+
+#group by local region in SB
+MSP.SB.group <- MSP.SB %>%
+  group_by(RegionName) %>%
+  summarise(median_price = median(price),
+            n=n())
+
+# sort RegionName by median_price
+MSP.SB.group[with(MSP.SB.group, order(-median_price)), ]
+```
+
+The house price in local region of Santa Barbara shows a large distribution. The difference between the highest and lowest house price in this area is about a factor of 2. 
+
+Next, the question we can ask is when is the best month to buy a house in Santa Barabara. To answer this question, I explored the house price changes by month in Santa Barabara, and compared it with the house price changes in USA.
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=8, month.price.SB}
+# subset house price data in SB
+MSP.SB.SB  <- subset(MSP.SB, RegionName == "Santa Barbara")
+
+MSP.SB.month <-  aggregate(MSP.SB.SB$price ~ month(MSP.SB.SB$monthyear), FUN = median) # aggregate monthyl house price in SB
+
+colnames(MSP.SB.month)[1] <- "month" # rename
+colnames(MSP.SB.month)[2] <- "price" # rename
+
+# subset house price data in USA
+MSP.USA <- subset(MSP.Nation, 
+                  select = c(RegionName, monthyear, price))
+MSP.USA.month <-  aggregate(MSP.USA$price ~ 
+                              month(MSP.USA$monthyear), 
+                            FUN = median) 
+colnames(MSP.USA.month)[1] <- "month" # rename
+colnames(MSP.USA.month)[2] <- "price" # rename
+
+median.SB.price <- median(MSP.SB.month$price) # median value in SB
+median.USA.price <- median(MSP.USA.month$price) # median value in USA
+
+p1 <- ggplot(aes(x=month, 
+                 y= (price - median.SB.price)/price*100),
+       data=MSP.SB.month) +
+      geom_bar(stat="identity", fill= "red", alpha = 0.5) +
+      geom_line(linetype="dashed", size = 0.6)+
+      scale_x_yearmon(breaks = c(1:12),
+                  labels = c("1","2","3","4","5","6",
+                             "7","8","9"," 10"," 11"," 12")) + 
+      ylim(c(-7, 15)) +
+      labs(x = "month", y = "variation of house price (%)", 
+      title = "Fig. 3-5a: Changes of median sold price by month 
+      in Santa Barbara (1996-2014)") +
+      theme(text = element_text(size=11))
+
+p2 <-  ggplot(aes(x=month, y= (price - median.USA.price)/price*100),
+      data=MSP.USA.month) +
+      geom_bar(stat="identity", fill= "blue", alpha = 0.5) +
+      geom_line(linetype="dashed", size = 0.6) +
+      scale_x_yearmon(breaks = c(1:12),
+                  labels = c("1","2","3","4","5","6",
+                             "7","8","9"," 10"," 11"," 12")) + 
+      ylim(c(-4, 1))+
+      labs(x = "month", y = "variation of house price (%)", 
+      title = "Fig. 3-5b: Changes of median sold price by month 
+      in USA (1996-2014)") +
+      theme(text = element_text(size=11))
+  
+grid.arrange(p1, p2, ncol=1)
+```
+
+Comparing the monthly median price in Santa Barbara city (Fig 3-5a) and USA (Fig 3-5b), I found that Santa Barbara historically had higher house price in January, February, March, November, and December. Therefore, it may not be a good idea to buy house in Santa Barbara during these months. The best month to buy a house in Santa Barbara might be in April, because the house price drops about 5 % in this month.  
+
+Unlike the monthly house price in Santa Barbara, It seems like the house price in USA has a season pattern, with lower prices in spring and higher prices in summer. Specifically, the national median price in spring is about 2-3.5 % lower than its median value, but the median national price in summer is about 1 % higher than its median value. Moreover, I found that the variation of house price in Santa Barbara is much greater than that in USA.
+
+#####(f) House price change depending on the season
+
+We know from Fig 3-5b that the national house price gets raised in summer. It would be interesting to look at the states where their house price get raised in summer months.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=4, fig.width=10, season.house.price}
+
+# subset house price data in summer 2012
+MSP.summer.2012 <-  subset(MSP.noOutlier, 
+                           monthyear >= "2012-06-01" &
+                            monthyear <= "2012-08-31"  ) %>%
+  group_by(state, region) %>%
+  summarise(price_summer = median(price),
+            n=n())
+# subset house price data in winter 2012
+MSP.winter.2012 <-  subset(MSP.noOutlier, 
+                           monthyear >= "2012-01-01" &
+                            monthyear <= "2012-02-28" |
+                             monthyear >= "2012-12-01" &
+                            monthyear <= "2012-12-31") %>%
+  group_by(state, region) %>%
+  summarise(price_winter = median(price),
+            n=n())
+# merge summer and winter data
+MSP.season.2012 <- merge(MSP.summer.2012, MSP.winter.2012, 
+                          c("state", "region") , all = TRUE)
+
+# calculate summer premium (%)
+MSP.season.2012$ratio <- (MSP.season.2012$price_summer 
+                          - MSP.season.2012$price_winter)/
+  MSP.season.2012$price_winter*100
+
+# plotting
+ggplot(aes(x = reorder(state, ratio), y = ratio, fill = region), 
+       data = subset(MSP.season.2012, !is.na(region))) + 
+  geom_bar(stat="identity") +
+  labs(y = "Summer premium (%)", x = "",
+      title = "Fig. 3-6: The states where house prices raises in summer 2012") +
+       theme(text = element_text(size = 11),
+             legend.title = element_blank())
+
+```
+
+The house prices of most of the states in the North Central and the Northeast raise in the summer than in the winter. Interestingly, HI, LA, AL, KY and NV have the opposite pricing trend. The house prices in these states are much cheaper in the summer than in the winter. Again, the house price in CA seems to be insensitive to the season, which is consistent to our early finding in Fig 3-5a.
+
+####B. Census data (2008-2012)
+
+In the following, I explored Census data between 2008 and 2012. Among the variables that I considered to explore are below.
+
+#####(a) The population estimate
+
+Let's first compare the population by state and by region.
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=5, fig.width=10 , populated.states}
+
+# calculate percentage of population for each state
+df_pop_state$percentage <- 
+  df_pop_state$pop / sum(df_pop_state$pop)*100
+
+# bar chart for population in USA (population is above national median value)
+p1 <- ggplot(data = subset(df_pop_state, 
+      percentage >= median(percentage)), 
+       aes(x = reorder(state, pop),
+           y = percentage, fill = region)) +
+       geom_bar(stat = "identity", 
+                 width = .8, alpha = .8) +
+       labs(y = "percentage of population", x = "",
+            title = "Fig. 3-7a: Median population by state 
+            above national median value") +
+       theme(text = element_text(size = 11),
+             axis.text.x = element_text(angle = 0, vjust = 0.7),
+             legend.position="none") +
+  coord_flip() 
+
+p2 <- ggplot(aes(x = reorder(region, pop), y = pop, 
+                          fill = region, width=.5),
+             data = subset(df_pop_state, !is.na(region))) +
+      geom_histogram(stat="summary", fun.y = median) +
+      geom_hline(yintercept = median(df_pop_state$pop), 
+                 color = "red") +
+       labs(y = "median population", x = "",
+            title = "Fig. 3-7b: Median population 
+            by region") +
+       theme(text = element_text(size = 11),
+             legend.title = element_blank())
+
+grid.arrange(p1, p2, ncol=2, widths=c(2, 2, 0.5))
+```
+
+CA has the largest population in USA (12 %). The most populous region in USA is the North Central, which is above the median national value (red line). The West has the lowest population in USA.
+
+#####(b) Median age 
+
+I'm interested to know whether the median age of people in state affects the house price. For example, the house price for a state with a high percentage of senior residents might be quire different that the state with a high population of younger residents and family. I explored the distribution of aged population by state and by region.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=5, fig.width=10, median.age}
+
+p1 <- ggplot(data = subset(df_median.age, 
+      med.age >= median(med.age)), 
+       aes(x = reorder(state, med.age),
+           y = med.age, fill = region)) +
+       geom_bar(stat = "identity", 
+                 width = .8, alpha = .8) +
+       labs(y = "median age", x = "",
+            title = "Fig. 3-8a: Median age by state 
+            above national median value") +
+       theme(text = element_text(size = 11),
+             legend.position="none") +
+  coord_flip() 
+
+p2 <- ggplot(aes(x = reorder(region, med.age),
+                 y = med.age, 
+                 fill = region, width = .5), 
+       data = subset(df_median.age, !is.na(region))) +
+  geom_histogram(stat="summary", fun.y = median) +
+  geom_hline(yintercept = median(df_median.age$med.age), 
+             color = "red") +
+  labs(y = "median age", x = "",
+            title = "Fig. 3-8b: Median age by region") +
+  theme(text = element_text(size = 11),
+        legend.title = element_blank())
+
+grid.arrange(p1, p2, ncol=2, widths=c(2, 2, 0.5))
+```
+
+ME has the oldest median age, whit a value of 42.8. That's more than five years above the national median age of 37.2. Interestingly, senior residents tend to live in the Northeast, whereas younger residents tend to live in the West.
+
+#####(c) Median household income
+
+Obviously, household income can affect the house price. Therefore, it is important to know the household income by state and by region.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=5, fig.width=10, household.income.2012}
+
+p1 <- ggplot(aes(x = reorder(state, med.income), 
+           y = med.income, fill = region), 
+       data = subset(df_median.income, !is.na(state) &
+            med.income >= median(med.income))) +
+         geom_bar(stat = "identity", 
+                 width = .8, alpha = .8) +
+  labs(y = "median household income", x = "",
+    title = "Fig. 3-9a: Median household income by state 
+            above national median value") +
+  theme(text = element_text(size = 11),
+        legend.position="none") +
+  coord_flip() 
+
+p2 <- ggplot(aes(x = reorder(region, med.income), 
+                 y = med.income, 
+                 fill = region, width = .5), 
+       data = subset(df_median.income, !is.na(region))) +
+  geom_histogram(stat="summary", fun.y = median) +
+  geom_hline(yintercept = median(df_median.income$med.income), 
+             color = "red") +
+  labs(y = "median household income", x = "",
+            title = "Fig. 3-9b: Median household income by region") +
+  theme(text = element_text(size = 11),
+        legend.title = element_blank())
+
+grid.arrange(p1, p2, ncol=2, widths=c(2, 2, 0.5))
+
+```
+
+People in NJ has the highest household income (92,722), which is about 40 % higher then the national median income. Although the house price in CA is very high, people lives in CA does not earn the highest income among other states. In general, residents in the Northeast and the West earn more household income, with their values above national median value. 
+
+#####(d) Homeowership
+
+I'm interested in analyzing what portion of homeowners’ income pays for housing costs. Using Census data, I compared the median homeowner's housing costs to the median homeowner's income for each state. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=5, fig.width=10, homeowership}
+
+#make a new dataframe for income/cost
+ratio.income.cost <- subset(merged_df1, 
+                            !is.na(median_sold_price) &
+                            !is.na(region),
+                            select=c(state, med.income,
+                                     med.housecost, pop, 
+                                     median_sold_price, region))
+
+# calculate ratio between house cost and income per month
+
+denominator = ratio.income.cost$med.income
+numerator = ratio.income.cost$med.housecost
+ratio.income.cost$ratio <- 
+  as.numeric(numerator/(denominator / 12)*100)
+
+# plot
+p1 <- ggplot(aes(x = reorder(state, ratio), 
+                 y = ratio, fill = region), 
+       data = subset(ratio.income.cost, 
+                     ratio >= median(ratio.income.cost$ratio))) +
+       geom_bar(stat = "identity", 
+                 width = .8, alpha = .8) +
+  labs(y = "house cost / income (%)", x = "",
+    title = "Fig. 3-10a:Ratio between homeowners’ income
+    and housing costs above national value") +
+  theme(text = element_text(size = 11),
+        legend.position="none") +
+  coord_flip() 
+
+p2 <- ggplot(aes(x = reorder(region, ratio), y = ratio, 
+                 fill = region, width = .5), 
+       data = ratio.income.cost) +
+  geom_histogram(stat="summary", fun.y = median) +
+  geom_hline(yintercept = median(ratio.income.cost$ratio), 
+             color = "red") +
+  labs(y = "house cost / income (%)", x = "",
+            title = "Fig. 3-10b: Percentage of homeowners’ income
+       pays for housing costs") +
+  theme(text = element_text(size = 11),
+        legend.title = element_blank())
+
+grid.arrange(p1, p2, ncol=2, widths=c(2, 2, 0.5))
+
+```
+
+Surprisingly, the most expensive state for homeowners is FL, where homeowners pay 22.3 % of their income in housing costs. Homeowners in CA pays 20.9 % of their income in housing costs. In general, homeowners in the West and Northeast pay most from their income in the housing costs. 
+
+####(e) House value and tax paid
+
+House value and tax paid by homeowners are two key factors to affect the house price. I'm interested to know is there any relation between house tax and house value.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=4, fig.width=7, housevalue.tax}
+
+ggplot(data = subset(merged_df1, !is.na(state)), 
+       aes(x = med.housevalue, y = housetax),
+       size = log(pop)) +
+  geom_point(aes(colour = factor(region)), shape = 19, alpha = .7) +
+    geom_vline(xintercept = 
+                 median(merged_df1$med.housevalue, na.rm = TRUE),
+             color = "red") +
+  labs(x = "median house value", y = "house tax", 
+       title = "Fig 3-11: Responsiveness of house value to tax") +
+    theme(text = element_text(size = 11),
+              axis.text.x = element_text(angle = 0, hjust = 1), 
+              legend.position="right",
+              legend.title = element_blank()) +
+  geom_smooth(aes(x = med.housevalue, y = housetax), 
+              data = subset(merged_df2, 
+              state != "HI" & state != "CA" & state != "NJ"), 
+              method = "lm", se = TRUE) +
+   geom_text(aes(y = housetax + 120, label = state, 
+                 color = region), size = 4, vjust = 0) 
+
+```
+
+House tax is approximately linearly proportional to house value (r^2^ = 0.44). Although the house price is very high in HI, the homeowners in HI do not pay higher house taxes. In contrast, homeowners in NJ pay the highest house tax. Another interesting finding was that the Northeast and the West has higher house values than the national median value (red line).
+
+r^2^ value: (excluded CA, HI, NJ)
+```{r, echo=FALSE, message=FALSE, warning=FALSE, r2.housevalue.tax}
+summary(lm(med.housevalue ~ housetax, 
+           data = subset(merged_df1, 
+          state != "HI" & state != "NJ" & 
+            state != "CA" )))$r.squared
+```
+
+#####(f) House age and years for homeowner moved into unit
+
+People tends to live in a new house. It would be intriguing to know whether the house age relates to the time period for homeoweners to stay in their house.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=4, fig.width=7, house.year.move}
+
+ggplot(data = subset(merged_df1, !is.na(region)), 
+                     aes(x = house.year,
+                         y = move.year),
+       size = log(pop)) +
+  geom_jitter(aes(colour = factor(region)), 
+             shape = 19, alpha = .7) +
+  labs(x = "median house year", y = "move year", 
+    title = "Fig. 3-12: Responsiveness of house year to move year") +
+    theme(text = element_text(size = 11),
+              axis.text.x = element_text(angle = 0, hjust = 1), 
+              legend.position="right",
+              legend.title = element_blank()) +
+    geom_smooth(aes(x = house.year, y = move.year), 
+              data = merged_df2, 
+              method = "lm", se = TRUE) +
+   geom_text(aes(y = move.year + 0, label = state, 
+                 color = region, position = 'jitter'), size = 4, vjust = 0) 
+
+```
+
+The relation between house age and the year for homeowner to stay in the unit has a poor linear correlation (r^2^ = 0.2). NY has the oldest median house age of 62, and homeowners in NY stay in their house for about 11 years. Generally, people in the Northeast and North Central tend to live in their house in a longer period of time (> 9 years). In contrast, people in the West, especially in NY anc AZ, moves more frequently.
+
+r^2^ value:
+```{r, echo=FALSE, message=FALSE, warning=FALSE, r2.houseyear}
+summary(lm(house.year ~ move.year, data = merged_df1))$r.squared
+```
+
+#####(g) Violent crime rates
+It is obviously that crime rates has a great impact on the house price. Firstly, let's take a look at how the crime rate changes with time in different regions. 
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=4, fig.width=9, violent.crime}
+
+ggplot(aes(x = Year, y = Crime), data = violent.crime) +
+      geom_line(aes(color = region), stat = 'summary', fun.y = median) +
+      labs( y = "Violent crime", 
+       title = 'Fig. 3-13: violent crime rates by region (1960-2010)')  + 
+  theme(text = element_text(size=11),
+              axis.text.x = element_text(angle=30, hjust=1), 
+              legend.position = "right", 
+              axis.title.x = element_blank(),
+              legend.title = element_blank())
+
+```
+
+Four regions in USA show the same pattern for crime rate with time. The violent crime rate increases linearly since 1960, and it reaches to the highest value in 1992. After 1992, the crime rate decreases gradually. Noted that the South has the highest crime rate in USA after 1990.
+
+Next, let's take a look at the crime data between 2008 and 2010.
+
+The top 5 crime states are:
+```{r echo=FALSE, message=FALSE, warning=FALSE, violent.crime.2012}
+
+head(violent.crime.2010 [order(violent.crime.2010$median_crime, 
+                               decreasing = T),],5)
+```
+
+NV is the state with the highest crime rate. 
+
+It would be interesting to compare the crime rates by region.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=3.5, fig.width=6, violent.crime.region}
+
+ggplot(aes(x = reorder(region, median_crime), 
+           y = median_crime), 
+       data = subset(violent.crime.2010, 
+                     !is.na(median_crime))) +
+  geom_boxplot() +
+  geom_hline(yintercept = 
+               median(violent.crime.2010$median_crime, 
+                      na.rm=TRUE), 
+             color = "red") +
+  theme(text = element_text(size = 11),
+        axis.title.x = element_blank()) +
+  labs(x = ' ', y = 'median violent crime.', 
+       title = 'Fig. 3-14: Median crime rate by region in USA (2008-2010)') 
+```
+
+The South has the highest violent crime rate of 497.2, which is 47.8 % higher than the national median value of 336.4. In contrast, the Northeast has the lowest violent crime rate of 300.9 in USA between 2008 and 2010. 
+
+####C. Census v.s. house data
+
+Here, I want to explore the relationship between the Census data and house data.
+
+#####(a) Correlation between house data and Census data (2008-2012)
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=8, correlation.pairs}
+
+## put (absolute) correlations on the upper panels,
+## with size proportional to the correlations.
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(0, 1, 0, 1))
+    r <- abs(cor(x, y))
+    txt <- format(c(r, 0.123456789), digits = digits)[1]
+    txt <- paste0(prefix, txt)
+    if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+    text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+     
+# now use the function for the data. (see figure)
+pairs(merged_df2[c(3,6:11,13,15,16)], 
+      lower.panel=panel.smooth, 
+      upper.panel=panel.cor,
+      main = "Fig. 3-15: Comparision of house price and Census data in USA (2008-2012)", cex.labels=0.8) 
+
+```
+
+We can summarize our observation based on Fig 3-15:
+
++ **Affordability**: House price has a strong linear correlation with house cost, house value, and household income, indicating that people who has higher income can afford more expensive house. 
+
++ **Stability**: Median age of people in state has a roughly linear correlation with the years that homeowners stay in their house (r^2^ = 0.61). This makes sense as older people tends to settle in one place for a longer period of time. 
+
++ **Tax**: House with higher value or cost will need to pay more tax. Homeowners has higher income will also pay more house tax. 
+
++ **Crime**: It was surprised that crime rate does not strongly correlate to the house price. I think the crime rate may become important when we explore house price in the city level.
+
+#####(b) Attempt to predict house price from Census data
+
+I want to see if I can build a linear model based on Census data to predict the house price. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, census.data.model}
+# make a new dataframe 
+#merged_df2 <- subset(merged_df1, !is.na(median_sold_price))
+# linear models
+m1 <- lm(log(I(median_sold_price)) ~ I(med.age), 
+         data = merged_df2)
+m2 <- update(m1, ~ . + med.housecost)
+m3 <- update(m2, ~ . + med.housevalue)
+m4 <- update(m3, ~ . + med.income)
+m5 <- update(m4, ~ . + housetax)
+m6 <- update(m5, ~ . + house.year)
+m7 <- update(m6, ~ . + move.year)
+m8 <- update(m7, ~ . + median_crime)
+
+mtable(m1, m2, m3, m4, m5, m6, m7, m8, summary.stats=c("R-squared","N"))
+
+```
+
+The models take into accounts the following features: *median age*, *house cost*, *house value*, *household income*, *house tax*, *house year*,  *move year*, and *crime rates* in state. Finally, the r^2^ is 0.848.
+
+Next, I used the median national values of the variables between 2008 and 2012 as input values to predict the house price, and calculate the accuracy of the prediction.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, census.data.pred}
+#make up random numbers in each features
+ThisHousePrice = 
+  data.frame(med.age = median(merged_df2$med.age),
+            med.housecost = median(merged_df2$med.housecost), 
+            med.housevalue = median(merged_df2$med.housevalue),
+            med.income = median(merged_df2$med.income), 
+            housetax=median(merged_df2$housetax),
+            house.year = median(merged_df2$house.year),
+            move.year = median(merged_df2$move.year),
+            median_crime = median(merged_df2$median_crime))
+
+modelEstimate = predict(m8, newdata = ThisHousePrice ,
+                        interval="prediction", level = .95)
+
+pred = exp(modelEstimate)[1] #predict house price per sqft.
+accurate = median(merged_df2$median_sold_price)
+
+1 -  ( accurate - pred ) / accurate
+```
+
+The accuracy of prediction for median house price is 93.4 %.
+
+####4. Final Plots and Summary
+
+In the following, I will summarize the data exploration of the house data.
+
+#####(a) Median sold price by state in USA
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height= 5, fig.width=10, Boxplot_State_2012}
+
+# red line: national median sold price, blue diamond: average sold price by state
+
+ggplot(aes(x=reorder(state, price), y=price, fill = region), 
+       data = subset(MSP1.2012, !is.na(region))) +
+  geom_boxplot(outlier.size = 1.5, outlier.shape = 21) + 
+  geom_hline(yintercept = median(MSP1.2012$price), color = "red") +
+  stat_summary(fun.y = "mean", geom = "point", 
+               shape = 23, size = 2.5, 
+               fill = "white", color = "blue")+
+  theme(text = element_text(size = 11),
+        axis.text.x = element_text(angle = 45, vjust = 0.7), 
+        axis.title.x = element_blank(),
+        legend.title = element_blank()) +
+  labs(x = 'State', y = 'median sold price per sqft.', 
+       title = 'Fig 4-1: Median sold price in USA') 
+
+```
+
+The median sold price in HI is the highest in USA, which is about a factor of 3 higher than the national median value (shown in red line). The median sold price in CA is the second highest in the country, but it exhibits a very wide distribution among other states. Moreover, the sold price in CA is about a factor 2 higher than the national sold price. 
+
+Interestingly, the house price in the New York city is thought to be very expensive, but the median sold price of the entire NY state is slightly below the national median price. Overall, We can clearly see that house prices of most states in the Northeast and the West are above the national value, whereas the prices of most South states are below the national value. This results are consistent with our previous findings. 
+
+#####(b) Median sold price by month (2008-2014)
+
+Fig 3-5b suggests that house price in USA may has a season pattern. Here, I explore the median sold price by month in USA to see if the house price has a seasonal trend.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=5, fig.width=10, facet.year}
+
+MSP.cities$month <- month(MSP.cities$monthyear)
+MSP.cities$year <- year(MSP.cities$monthyear)
+
+ggplot(aes(x = year, y = price), 
+       data=subset(MSP.cities, Metro == 'USA' & 
+                     monthyear >= "2008-01-01" & 
+                     monthyear <= "2014-12-31", 
+                   !is.na(price))) +
+  geom_line(stat = 'summary', fun.y = median) +
+  geom_line(stat = "hline", yintercept = "median", 
+            colour = "#BB0000", linetype = "dashed") +
+  # dashed red line: median value of sold price in each month
+  facet_wrap(~month, ncol = 6) +
+#  scale_x_yearmon(breaks = c(1:7),labels #=c("2008","2009","2010","2011","2012","2013","2014")) + 
+  labs(x = "year", y = "median sold price per sqft.", 
+       title = "Fig 4-2: Median sold price per sqft by month")+
+  theme(text = element_text(size = 11),
+              axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+Fig 4-2 shows the median house price by month between 2008 and 2014. The median house prices (red dashed line) in June, July, and August are the highest among other months. Therefore, it confirms our early exploration that there’s a clear seasonal trend in house prices, with a peak sometime in the summer. This finding indicates that the season does affect house prices in USA.
+
+#####(c) Explore the relationship between Census data and house price (2008-2012)
+
+Finally, I want to compare three key factors, house cost/income ratio, house age, and crime rate, to the house price.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=14, fig.width=7, census.data.all}
+
+# cost / income
+p1 <- ggplot(aes(x = median_sold_price, y = ratio, 
+                  size=log(pop)), data = ratio.income.cost) +   
+geom_point(aes(colour = factor(region)), shape=19, alpha=.7) +
+  scale_x_log10(breaks = seq(50,500, by=50)) + 
+  scale_y_continuous(limits = c(15, 25), 
+                     breaks = seq(15, 25, by=2.5)) +
+  geom_smooth(aes(x = median_sold_price, y = ratio), 
+              data=ratio.income.cost, method = "lm", se = FALSE) +
+  geom_hline(yintercept = median(ratio.income.cost$ratio),
+             linetype="dashed", size = .5, color = "red") +
+  geom_vline(xintercept = median(ratio.income.cost$median_sold_price), 
+             linetype="dashed", size = .5, color ="red") +
+  labs(x = "median house price per sqft.", 
+       y = "monthly house cost per income (%)", 
+    title = "Fig 4-3a: Responsiveness of house cost/income to price") +
+        theme(text = element_text(size=11),
+              axis.text.x = element_text(angle = 0, hjust = 1),
+              legend.position = "right"
+              )  +
+   geom_text(aes(y = ratio + 0.5, label = state, color = region),
+             size = 4, vjust = 0) +
+  annotate("text", label="r^2==0.568", parse = TRUE,
+           x = 250, y = 21, color = "blue")
+
+# house year v.s. house price**
+p2 <- ggplot(aes(x = median_sold_price, y = house.year, 
+                 size = log(pop)), data = merged_df2) +   
+  geom_point(aes(colour = factor(region)), shape = 19, alpha = .7) +
+  scale_x_log10(breaks = seq(50,350, by=50)) +
+  geom_smooth(aes(x = median_sold_price, y = house.year), 
+              data = merged_df2, method = "lm", se = FALSE) +
+  geom_hline(yintercept = median(merged_df2$house.year), 
+             linetype = "dashed", size = .5, color = "red") +
+  geom_vline(xintercept = median(merged_df2$median_sold_price), 
+             linetype = "dashed", size = .5, color = "red") +
+  labs(x = "median house price per sqft.", y = "median house year", 
+       title = "Fig 4-3b: Responsiveness of house year to price") +
+    theme(text = element_text(size = 11),
+              axis.text.x = element_text(angle = 0, hjust = 1), 
+              legend.position="right") +
+   geom_text(aes(y = house.year +2, label = state, color = region), 
+             size = 4, vjust = 0) +
+  annotate("text", label="r^2==0.350", parse = TRUE, 
+           x = 250, y = 48, color = "blue")
+
+# crime rate
+p3 <- ggplot(aes(x = median_sold_price, y = median_crime, 
+                 size = log(pop)), data = merged_df2) +   
+  geom_point(aes(colour = factor(region)), shape = 19, alpha = .7) +
+  scale_x_log10(breaks = seq(50,350, by=50)) +
+  geom_smooth(aes(x = median_sold_price, y = median_crime), 
+              data = merged_df2, method = "lm", se = FALSE) +
+  geom_hline(yintercept = median(merged_df2$median_crime), 
+             linetype = "dashed", size = .5, color = "red") +
+  geom_vline(xintercept = median(merged_df2$median_sold_price), 
+             linetype = "dashed", size = .5, color = "red") +
+  labs(x = "median house price per sqft.", y = "median crime rate", 
+       title = "Fig 4-3c: Responsiveness of crime rate to house price") +
+    theme(text = element_text(size = 11),
+              axis.text.x = element_text(angle = 0, hjust = 1), 
+              legend.position = "right") +
+   geom_text(aes(y = median_crime + 20, label = state, color = region), 
+             size = 4, vjust = 0) +
+  annotate("text", label="r^2== -0.40", parse = TRUE, 
+           x = 250, y = 300, color = "blue")
+
+#The horizontal and vertical red dashed lines represent median value of median age and median sold price, respectively. The circle area represents the logarithmic populatoin in each state
+
+# arrange ggplot2 graphs with a specific width
+grid.arrange(p1, p2, p3, ncol=1)
+```
+
+- **Homeowership vs. house price**
+
+The most expensive state for homeowners is FL, where they pay 22.3 % of their income in housing costs. Also, the homeowners in the West and Northeast need to pay most of homeowner's income in the housing costs. In most cases, the higher the house price, the higher the cost/income ratio.
+
+- **House year vs. house price**
+
+I expected to see new house has a higher sold price, but it seems to be not the case. The general trend was that older house gets higher sold price. Specifically, the Northeast has more old house, but their house prices are much higher than other regions. In contract, the West has more new house, but the house price in most West states are below the national median price.
+
+- **Crime rate vs. house price**
+
+As expected, the house price is in general inversely proportional to the crime rate. The South states has higher crime rate, while their house prices are much cheaper. 
+
+- **Summary**
+
+What’s interesting here is that the real estate markets have the trend with demographic features. We can use the median value of house price and the demographic features to found that there are four quadrants in the Fig 4-3. 
+
+Generally, the markets in the Northeast and West state are in the top-right corner in Fig 4-3a (or the bottom-right corner in Fig 4-3c). Most of these markets are in "hot economic" states, with high household income and low crime rate. In contrast, most of the South states are in the opposite corner, which has low income and high crime rate. These house markets are relatively cheap. What catches my eye here are the house in these markets are relatively new, so it might be a good idea for future investment.
+
+####5. Reflection
+
+##### Struggles
+
+One of the challenges I had with the data set was to deal with the format from different source. For example, I had a problem with grouping two dataframes by state with different sizes. Also, I found many values that were missing in the house data set from Zillow. Another challenge was to find useful information from data set to compare housing price. I attempted to find the school rating in state, but I can only found the data at the city level.
+
+##### Successes
+
+I was able to extract house price at select cities and states, and monitored the price changes with time. I was especially interested in the comparison of house sold price by month, and found a clear seasonal pattern for house prices. I also was enable to use a linear model to predict the house sold price. Although there are many other factors that can affect house price, the analysis in this project could be a starting point to better understand the real estate price in future.
+
+##### Future Exploration
+
+The real estate price largely depends on neighborhood. It would be interesting to analyze the data at city level. The data for future exploration could be unemployment rate, school rating, distance to major employment centres, accessibility to highways, and etc. However, I found these data sets are not easy to access. If one could obtain these data set, it would give clues of how these features affect house price. This information could be very useful for future investments and exploration. 
