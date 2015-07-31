@@ -22,7 +22,7 @@ I conducted exploratory data analysis using R to explores the variables, structu
 
 ####Files
 
-- **Project summary** ([Rmd](Project3_RealEstateDataAnalsis.Rmd), [html](https://htmlpreview.github.io/?https://github.com/cyuancheng/explore-and-summarize-data_2/blob/master/Project3_RealEstateDataAnalsis.html))    
+- **Project summary** ([Rmd](Project3_RealEstateDataAnalsis.Rmd), [html](https://htmlpreview.github.io/?https://github.com/cyuancheng/explore-and-summarize-data_2/blob/master/Project3_RealEstateDataAnalsis.html), [PDF](Project3_RealEstateDataAnalsis.pdf))    
  includes exploratory data analysis for  residential real estate data  and Census data in USA between 2009 and 2014. 
 - **Data files**  
 	includes two data files for house price in USA from Zillow.
