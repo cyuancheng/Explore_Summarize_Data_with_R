@@ -1,0 +1,7 @@
+name: Publish Document
+account: rpubs
+server: rpubs.com
+bundleId:
+        https://api.rpubs.com/api/v1/document/119041/16c4ca81ffd6405293a20d42b63804d4
+url: http://rpubs.com/cyuancheng/119041
+when: 1445375872.06403

@@ -1048,7 +1048,7 @@ We can summarize our observation based on Fig 3-15:
 
 + **Stability**: Median age of people in state has a roughly linear correlation with the years that homeowners stay in their house (r^2^ = 0.61). This makes sense as older people tends to settle in one place for a longer period of time. 
 
-+ **Tax**: House with higher value or cost will need to pay more tax. Homeowners has higher income will also pay more house tax. 
++ **Tax**: House with higher value or cost will need to pay more tax. Homeowners who have higher income will also pay more house tax. 
 
 + **Crime**: It was surprised that crime rate does not strongly correlate to the house price. I think the crime rate may become important when we explore house price in the city level.
 
