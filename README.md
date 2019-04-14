@@ -1,6 +1,6 @@
-##Project 3: Analyzing Real Estate Data | Data Analysis with R
+## Analyzing Real Estate Data | Data Analysis with R
 
-- Author:  Chi-Yuan Cheng (cyuancheng AT gmail DOT com) 
+- Author:  Chiyuan Cheng (cyuancheng AT gmail DOT com) 
 - Last updated: June 25, 2015
 
 ### Information
