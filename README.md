@@ -32,9 +32,6 @@ In this project, I did data cleaning, manipulation and analysis using R program.
 - Violent crime rates (per 100,000) by state in USA, 1960-2010, from [rMaps](https://github.com/ramnathv/rMaps/tree/master/data). 
 
 
-![NYC 8pm](https://github.com/cyuancheng/Intro-Data-Science/blob/master/turnstile_map_20.png "8am")
- 
- 
 - **Project report by reviewer**
 ### Files
 
